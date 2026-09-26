@@ -1,11 +1,12 @@
 import type { CategoryId, Lang, TaskStatus, User } from "./types";
 import { uiText } from "./i18n";
 import { countsAsOpenJob, MIN_OFFER_INR } from "./workflow";
+import { paiseToRupees, PLATFORM_COMMISSION_BPS, rupeesToPaise, splitCommissionPaise } from "./money";
 
 export const NEW_HELPER_TASKS = 5;
 export const NEW_HELPER_CAP = 1000;
 
-export const PLATFORM_FEE = 0.1;
+export const PLATFORM_FEE = PLATFORM_COMMISSION_BPS / 10_000;
 export const CITY = "Rishikesh";
 
 export const CATEGORIES: {
@@ -176,8 +177,12 @@ export function money(amount: number) {
 }
 
 export function splitFee(amount: number) {
-  const fee = Math.round(amount * PLATFORM_FEE);
-  return { fee, helper: amount - fee, total: amount };
+  const parts = splitCommissionPaise(rupeesToPaise(amount));
+  return {
+    fee: paiseToRupees(parts.commissionPaise),
+    helper: paiseToRupees(parts.helperGrossPaise),
+    total: paiseToRupees(parts.amountPaise),
+  };
 }
 
 export function tx(lang: Lang, en: string, hi: string) {

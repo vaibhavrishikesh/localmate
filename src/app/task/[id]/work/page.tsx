@@ -208,7 +208,7 @@ export default function WorkPage() {
       {involved && chatRestricted && other && (
         <div className="stack" style={{ marginTop: 16 }}>
           <button className="btn danger wide" type="button" onClick={() => setSafety(true)}>{t("Report or manage block", "रिपोर्ट या ब्लॉक मैनेज करें")}</button>
-          <a className="btn ghost wide" href="mailto:support@localmate.app">{t("Contact LocalMate support", "LocalMate सपोर्ट से संपर्क")}</a>
+          <a className="btn ghost wide" href="https://wa.me/919711964456?text=Hi%20Kamal%2C%20LocalMate%20support">{t("Contact LocalMate support", "LocalMate सपोर्ट से संपर्क")}</a>
         </div>
       )}
       {safety && other && <SafetySheet userId={other.id} taskId={task.id} onClose={() => setSafety(false)} />}

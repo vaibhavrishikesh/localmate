@@ -154,7 +154,7 @@ export default function WelcomePage() {
             >
               <p className="kicker">{t("Step 2 of 2", "चरण 2 / 2")}</p>
               <h2 className="display">{t("Enter the code", "कोड डालें")}</h2>
-              <p className="info">{t("Preview: any 4 digits work. No SMS is sent. Phone check ≠ ID clearance.", "प्रीव्यू: कोई भी 4 अंक चलेंगे। SMS नहीं। फ़ोन चेक ≠ ID क्लीयरेंस।")}</p>
+              <p className="info">{t("Preview: any 4 digits work. No SMS is sent. Phone check ≠ ID clearance. For real Auth, configure Supabase email/phone providers — see docs/SUPABASE_SETUP.md.", "प्रीव्यू: कोई भी 4 अंक चलेंगे। SMS नहीं। फ़ोन चेक ≠ ID क्लीयरेंस। असली Auth के लिए Supabase सेट करें — docs/SUPABASE_SETUP.md।")}</p>
               <label className="field">
                 <span>{t("Code", "कोड")}</span>
                 <input

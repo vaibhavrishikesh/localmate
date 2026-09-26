@@ -15,6 +15,7 @@
 - **Category:** Lifestyle
 - **Tags:** local help, rishikesh, tasks, errands
 - **Privacy policy URL:** https://localmate-omega.vercel.app/privacy
+- **Contact:** Kamal Negi · Rishikesh · WhatsApp +91 97119 64456
 - **Contact email:** (add your Play Console email)
 
 ## Release checklist

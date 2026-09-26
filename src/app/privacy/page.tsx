@@ -10,7 +10,7 @@ export default function PrivacyPage() {
       <p style={{ color: "#5c6b66", marginBottom: 20 }}>Last updated: 26 Sep 2026</p>
 
       <h2 style={{ fontSize: 18 }}>Who we are</h2>
-      <p>LocalMate is a local task marketplace for Rishikesh (prototype). The Android app loads the service at localmate-omega.vercel.app.</p>
+      <p>LocalMate is a local task marketplace for Rishikesh (prototype), operated by Kamal Negi. The Android app loads the service at localmate-omega.vercel.app.</p>
 
       <h2 style={{ fontSize: 18 }}>What we collect</h2>
       <p>Name, phone number (demo OTP), task details, offers, chat messages, and basic app usage needed to run the service. This prototype does not collect government ID photos or real card numbers.</p>
@@ -22,10 +22,16 @@ export default function PrivacyPage() {
       <p>Information you publish (tasks, public profile bits) can be seen by other LocalMate users. We do not sell personal data.</p>
 
       <h2 style={{ fontSize: 18 }}>Your choices</h2>
-      <p>You may stop using the app at any time. For account deletion requests in this prototype, contact the developer operating the deployment.</p>
+      <p>You may stop using the app at any time. For account deletion requests in this prototype, contact Kamal Negi (WhatsApp +91 97119 64456).</p>
 
       <h2 style={{ fontSize: 18 }}>Contact</h2>
-      <p>GitHub: <a href="https://github.com/vaibhavrishikesh/localmate">vaibhavrishikesh/localmate</a></p>
+      <p>
+        Operator: <strong>Kamal Negi</strong> · Rishikesh
+        <br />
+        WhatsApp: <a href="https://wa.me/919711964456">+91 97119 64456</a>
+        <br />
+        GitHub: <a href="https://github.com/vaibhavrishikesh/localmate">vaibhavrishikesh/localmate</a>
+      </p>
 
       <p style={{ marginTop: 28 }}><Link href="/">← LocalMate home</Link></p>
     </main>
