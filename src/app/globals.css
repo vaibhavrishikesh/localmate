@@ -98,6 +98,20 @@ h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.005em; }
   line-height: 1;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
 }
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  background: #1e4d3b;
+}
+.topbar.tall .brand-mark { width: 48px; height: 48px; border-radius: 14px; }
 .topbar .tag {
   display: block;
   margin-top: 6px;

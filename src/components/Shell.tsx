@@ -54,7 +54,10 @@ export function TopBar({ tall = false, tagline }: { tall?: boolean; tagline?: st
   return (
     <header className={`topbar ${tall ? "tall" : ""}`}>
       <div>
-        <div className="brand">LocalMate</div>
+        <div className="brand-row">
+          <img className="brand-mark" src="/icons/logo.png" width={36} height={36} alt="" />
+          <div className="brand">LocalMate</div>
+        </div>
         {tagline ? (
           <span className="tag">{tagline}</span>
         ) : (
