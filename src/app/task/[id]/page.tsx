@@ -164,14 +164,15 @@ export default function TaskPage() {
                   <span>{t("Your price (₹)", "आपकी कीमत (₹)")}</span>
                   <div className="money-input">
                     <input
-                      type="number"
+                      type="text"
                       inputMode="numeric"
-                      min={MIN_OFFER_INR}
-                      max={task.budget}
-                      step={1}
+                      pattern="[0-9]*"
                       value={amount}
+                      placeholder={t("Enter amount", "रकम लिखें")}
                       onChange={(event) => {
-                        setAmount(event.target.value);
+                        const raw = event.target.value.replace(/[^\d]/g, "");
+                        const next = raw.replace(/^0+(?=\d)/, "");
+                        setAmount(next === "0" ? "" : next);
                         setOfferError("");
                       }}
                       aria-invalid={Boolean(offerError)}

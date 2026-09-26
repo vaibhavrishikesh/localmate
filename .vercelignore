@@ -1,0 +1,6 @@
+android
+android-www
+.capacitor
+*.apk
+*.aab
+data

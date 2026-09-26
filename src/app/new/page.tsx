@@ -30,14 +30,16 @@ function NewTaskForm() {
   const [whenId, setWhenId] = useState("today-5");
   const [customWhen, setCustomWhen] = useState("");
   const [mode, setMode] = useState<PriceMode>("fixed");
-  const [budget, setBudget] = useState(500);
+  const [budgetText, setBudgetText] = useState("500");
   const [error, setError] = useState("");
   const [posting, setPosting] = useState(false);
 
   const when = WHENS.find((item) => item.id === whenId) ?? WHENS[0];
-  const parts = splitFee(budget);
+  const budget = budgetText.trim() === "" ? NaN : Number(budgetText);
+  const budgetOk = Number.isFinite(budget) && Number.isInteger(budget) && budget >= 50;
+  const parts = splitFee(budgetOk ? budget : 0);
   const areaLabel = (id: string) => AREAS.find((item) => item.id === id)?.[lang === "hi" ? "hi" : "en"] ?? id;
-  const canPost = user?.role === "customer" && title.trim().length > 2 && budget >= 50;
+  const canPost = user?.role === "customer" && title.trim().length > 2 && budgetOk;
 
   return (
     <Shell>
@@ -58,6 +60,11 @@ function NewTaskForm() {
         onSubmit={async (event) => {
           event.preventDefault();
           setPosting(true);
+          if (!budgetOk) {
+            setPosting(false);
+            setError(t("Add a title, details, and a price of at least ₹50.", "टाइटल, डिटेल, और कम से कम ₹50 कीमत डालें।"));
+            return;
+          }
           const whenLabel = whenId === "custom" ? customWhen.trim() : when.en;
           const whenLabelHi = whenId === "custom" ? customWhen.trim() : when.hi;
           const result = await createTask({
@@ -112,7 +119,7 @@ function NewTaskForm() {
               setToArea("laxman");
               setWhenId("today-5");
               setMode("fixed");
-              setBudget(500);
+              setBudgetText("500");
             }}
           >
             {t("Fill the luggage sample", "सामान वाला उदाहरण भरें")}
@@ -167,7 +174,15 @@ function NewTaskForm() {
               <strong>{t("Fixed price", "फिक्स्ड कीमत")}</strong>
               <span className="sub">{t("Helpers accept exactly this amount.", "हेल्पर ठीक यही रकम स्वीकार करते हैं।")}</span>
             </button>
-            <button type="button" className={`choice ${mode === "negotiable" ? "on" : ""}`} onClick={() => setMode("negotiable")}>
+            <button
+              type="button"
+              className={`choice ${mode === "negotiable" ? "on" : ""}`}
+              onClick={() => {
+                setMode("negotiable");
+                // Blank budget so "0" never sticks in Your budget
+                setBudgetText("");
+              }}
+            >
               <strong>{t("Negotiable", "बातचीत से")}</strong>
               <span className="sub">{t("Helpers can offer a different price. You choose.", "हेल्पर दूसरी कीमत बता सकते हैं। फैसला आपका।")}</span>
             </button>
@@ -175,20 +190,39 @@ function NewTaskForm() {
           <label className="field">
             <span>{mode === "fixed" ? t("You pay", "आप देंगे") : t("Your budget", "आपका बजट")}</span>
             <div className="money-input">
-              <input type="number" min={50} step={10} value={budget} onChange={(event) => setBudget(Number(event.target.value))} />
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                value={budgetText}
+                placeholder={t("Enter amount", "रकम लिखें")}
+                onChange={(event) => {
+                  // Digits only; allow fully empty so "0" can be cleared.
+                  const raw = event.target.value.replace(/[^\d]/g, "");
+                  // Strip leading zeros except when the field is only zeros being deleted → empty
+                  const next = raw.replace(/^0+(?=\d)/, "");
+                  setBudgetText(next === "0" ? "" : next);
+                }}
+                onFocus={(event) => event.currentTarget.select()}
+                aria-invalid={budgetText !== "" && !budgetOk}
+              />
             </div>
+            {budgetText === "" && (
+              <span className="help">{t("Type a budget of at least ₹50.", "कम से कम ₹50 बजट लिखें।")}</span>
+            )}
           </label>
           <div className="wrap">
             {[200, 300, 500, 700, 1000].map((amount) => (
-              <button key={amount} type="button" className={`chip ${budget === amount ? "on" : ""}`} onClick={() => setBudget(amount)}>
+              <button key={amount} type="button" className={`chip ${budget === amount ? "on" : ""}`} onClick={() => setBudgetText(String(amount))}>
                 {money(amount)}
               </button>
             ))}
           </div>
           <div className="card flat split">
-            <div><span>{t("You pay", "आप देंगे")}</span><strong>{money(parts.total)}</strong></div>
-            <div><span>{t("LocalMate commission 10%", "LocalMate कमीशन 10%")}</span><span>{money(parts.fee)}</span></div>
-            <div className="total"><span>{t("Helper receives", "हेल्पर को मिलेंगे")}</span><strong style={{ color: "var(--green)" }}>{money(parts.helper)}</strong></div>
+            <div><span>{t("You pay", "आप देंगे")}</span><strong>{budgetOk ? money(parts.total) : "—"}</strong></div>
+            <div><span>{t("LocalMate commission 10%", "LocalMate कमीशन 10%")}</span><span>{budgetOk ? money(parts.fee) : "—"}</span></div>
+            <div className="total"><span>{t("Helper receives", "हेल्पर को मिलेंगे")}</span><strong style={{ color: "var(--green)" }}>{budgetOk ? money(parts.helper) : "—"}</strong></div>
           </div>
         </div>
 

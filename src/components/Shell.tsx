@@ -4,6 +4,7 @@ import { isClearedHelper, tx } from "@/lib/catalog";
 import { textDir } from "@/lib/i18n";
 import { useStore } from "@/lib/store";
 import type { Lang } from "@/lib/types";
+import { InstallAppBanner } from "@/components/InstallAppBanner";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
@@ -152,6 +153,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
+        <InstallAppBanner />
         <main className="screen">{children}</main>
         <nav className="nav" aria-label="Main">
           {items.map((item) => {

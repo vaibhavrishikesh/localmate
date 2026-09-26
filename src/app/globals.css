@@ -658,6 +658,28 @@ html[dir="rtl"] .bubble.mine { margin-left: 0; margin-right: auto; }
 .skeleton { background: linear-gradient(90deg, #ecebe5 25%, #f4f3ee 50%, #ecebe5 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 10px; }
 .divider { height: 1px; background: var(--line); margin: 16px 0; }
 
+.install-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 14px 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--green-soft);
+  border: 1px solid #cfe0d6;
+  animation: rise 0.35s var(--ease);
+}
+.install-banner-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.install-banner-copy strong { font-size: 13.5px; color: var(--green-deep); }
+.install-banner-copy span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.install-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes up { from { transform: translateY(24px); } to { transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
