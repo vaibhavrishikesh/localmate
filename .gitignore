@@ -57,4 +57,7 @@ android/local.properties
 *.aab
 *.jks
 *.keystore
+android/keystore/
 .capacitor/
+dist-apk/
+dist-aab/
