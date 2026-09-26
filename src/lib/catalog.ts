@@ -92,6 +92,10 @@ const PHRASES: { en: string; hi: string }[] = [
     en: "you are connected. keep the task and payment inside localmate.",
     hi: "आप जुड़ गए हैं। काम और पेमेंट LocalMate के अंदर ही रखें।",
   },
+  {
+    en: "helper confirmed arrival at the official meet pin. do not change the meeting place in chat.",
+    hi: "हेल्पर ने आधिकारिक मिलन पिन पर पहुँच कन्फ़र्म की। चैट में मिलने की जगह न बदलें।",
+  },
   { en: "i can do this", hi: "मैं यह कर सकता हूँ" },
   { en: "i can do this.", hi: "मैं यह कर सकता हूँ।" },
   { en: "on my way", hi: "मैं रास्ते में हूँ" },
@@ -248,8 +252,15 @@ export function mapsEmbedUrl(lat: number, lng: number, zoom = 15) {
   return `https://maps.google.com/maps?q=${lat},${lng}&z=${zoom}&output=embed`;
 }
 
-export function mapsDirectionsUrl(lat: number, lng: number) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
+/** Prefer lockedDirectionsUrl(areaId) for helpers — lat/lng only, no chat text. */
+export function mapsDirectionsUrl(lat: number, lng: number, origin?: { lat: number; lng: number }) {
+  const params = new URLSearchParams({
+    api: "1",
+    destination: `${lat},${lng}`,
+    travelmode: "walking",
+  });
+  if (origin) params.set("origin", `${origin.lat},${origin.lng}`);
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
 export function mapsPlaceUrl(lat: number, lng: number) {

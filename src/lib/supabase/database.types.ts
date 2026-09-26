@@ -64,6 +64,7 @@ export interface TaskRow {
   helper_id: string | null;
   agreed_amount: number | null;
   location_shared: boolean;
+  helper_arrived_at: string | null;
   helper_marked_done_at: string | null;
   customer_confirmed_at: string | null;
   cancelled_at: string | null;

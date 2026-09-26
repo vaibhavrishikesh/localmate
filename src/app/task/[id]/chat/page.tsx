@@ -2,16 +2,17 @@
 
 import { Avatar, StatusPill } from "@/components/Bits";
 import { ICONS, Icon, Shell, useLang } from "@/components/Shell";
-import { translate } from "@/lib/catalog";
+import { areaName, translate } from "@/lib/catalog";
+import { looksLikeBaitLocation } from "@/lib/navSafety";
 import { useStore } from "@/lib/store";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const QUICK = [
-  ["On my way", "मैं रास्ते में हूँ"],
-  ["I have arrived", "मैं पहुँच गया हूँ"],
-  ["Where should we meet?", "हम कहाँ मिलें?"],
+  ["On my way to the official pin", "मैं आधिकारिक पिन की तरफ हूँ"],
+  ["I have arrived at the meet pin", "मैं मिलन पिन पर पहुँच गया हूँ"],
+  ["Please stay at the pinned place", "कृपया पिन वाली जगह पर रहें"],
   ["I need someone to help me find a local SIM card.", "मुझे लोकल सिम कार्ड ढूँढने में मदद चाहिए।"],
 ] as const;
 
@@ -69,6 +70,14 @@ export default function ChatPage() {
         </div>
       ) : (
         <>
+          {task && (
+            <p className="note" role="status" style={{ marginTop: 12 }}>
+              {t(
+                `Meet only at ${areaName(task.area, lang)}${task.toArea ? ` → ${areaName(task.toArea, lang)}` : ""}. Ignore new pins from chat or WhatsApp — use Navigate on the work screen.`,
+                `सिर्फ़ ${areaName(task.area, lang)}${task.toArea ? ` → ${areaName(task.toArea, lang)}` : ""} पर मिलें। चैट/WhatsApp के नए पिन न मानें — वर्क स्क्रीन पर नेविगेट इस्तेमाल करें।`,
+              )}
+            </p>
+          )}
           <div className="stack" style={{ marginTop: 16, gap: 8 }}>
             {messages.map((message) => {
               if (message.senderId === "system") {
@@ -78,6 +87,7 @@ export default function ChatPage() {
               const mine = message.senderId === user?.id;
               const shown = translate(message.text, lang);
               const changed = shown.trim().toLowerCase() !== message.text.trim().toLowerCase();
+              const bait = looksLikeBaitLocation(message.text);
               return (
                 <div key={message.id} className={`bubble ${mine ? "mine" : ""}`}>
                   {changed && !mine && (
@@ -85,6 +95,14 @@ export default function ChatPage() {
                   )}
                   <span style={{ display: "block" }}>{changed ? shown : message.text}</span>
                   {changed && <span className="orig">{message.text}</span>}
+                  {bait && !mine && (
+                    <span className="meta" style={{ display: "block", marginTop: 6, color: "#7a2d1c", fontWeight: 600 }}>
+                      {t(
+                        "⚠ Possible meet-point change — stay on the official pin on the work screen.",
+                        "⚠ मिलन जगह बदलने की कोशिश लग रही है — वर्क स्क्रीन के आधिकारिक पिन पर रहें।",
+                      )}
+                    </span>
+                  )}
                 </div>
               );
             })}

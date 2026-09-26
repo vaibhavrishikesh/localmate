@@ -149,6 +149,29 @@ export async function sbShareLocation(userId: string, taskId: string): Promise<R
   return { ok: true, state: await loadSupabasePublicState(userId) };
 }
 
+export async function sbConfirmArrival(
+  userId: string,
+  taskId: string,
+  _coords?: { lat: number; lng: number; accuracy?: number | null } | null,
+): Promise<Result> {
+  const sb = await asUser();
+  const { data: task } = await sb.from("tasks").select("*").eq("id", taskId).single();
+  if (!task) return { ok: false, error: "Task not found" };
+  if (task.helper_id !== userId) {
+    return { ok: false, error: "Only the helper can confirm arrival." };
+  }
+  if (task.status !== "matched" && task.status !== "active") {
+    return { ok: false, error: "Task is not in progress." };
+  }
+  if (task.helper_arrived_at) {
+    return { ok: true, state: await loadSupabasePublicState(userId) };
+  }
+  const now = new Date().toISOString();
+  const { error } = await sb.from("tasks").update({ helper_arrived_at: now }).eq("id", taskId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, state: await loadSupabasePublicState(userId) };
+}
+
 export async function sbHoldPayment(userId: string, taskId: string): Promise<Result> {
   const sb = hasServiceRole() ? admin() : await asUser();
   const { data: task } = await sb.from("tasks").select("*").eq("id", taskId).single();
@@ -190,6 +213,9 @@ export async function sbTransition(
     userId,
   );
   if (!gate.ok) return { ok: false, error: gate.error };
+  if (action === "helper_mark_done" && !task.helper_arrived_at) {
+    return { ok: false, error: "Confirm arrival at the official pin before marking done." };
+  }
   const { error } = await sb
     .from("tasks")
     .update({ status: nextStatus(action), ...patch })

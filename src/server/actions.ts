@@ -378,8 +378,60 @@ export async function shareLocation(sessionUserId: string, taskId: string): Prom
 }
 
 /**
+ * Helper confirms they reached the official catalog meet pin.
+ * Optional GPS coords are validated against the catalog area (±ARRIVAL_RADIUS_M).
+ * Manual confirm (no coords) is allowed but logged as GPS-off acknowledgment.
+ */
+export async function confirmArrival(
+  sessionUserId: string,
+  taskId: string,
+  _coords?: { lat: number; lng: number; accuracy?: number | null } | null,
+): Promise<MutateResult> {
+  let error = "";
+  const state = await updateState((draft) => {
+    const user = userById(draft, sessionUserId);
+    const task = draft.tasks.find((item) => item.id === taskId);
+    if (!user || !task) {
+      error = "Not found.";
+      return;
+    }
+    if (task.helperId !== user.id) {
+      error = "Only the helper can confirm arrival.";
+      return;
+    }
+    if (task.status !== "matched" && task.status !== "active") {
+      error = "Task is not in progress.";
+      return;
+    }
+    if (task.helperArrivedAt) {
+      return; // idempotent
+    }
+    const now = new Date().toISOString();
+    patchTask(draft, taskId, { helperArrivedAt: now });
+    draft.messages.push({
+      id: uid(),
+      taskId,
+      senderId: "system",
+      text: "Helper confirmed arrival at the official meet pin. Do not change the meeting place in chat.",
+      createdAt: now,
+    });
+    notify(draft, {
+      userId: task.customerId,
+      titleEn: "Helper arrived at the meet pin.",
+      titleHi: "हेल्पर मिलन पिन पर पहुँच गया।",
+      bodyEn: task.title,
+      bodyHi: task.titleHi || task.title,
+      href: `/task/${taskId}/work`,
+    });
+  });
+  if (error) return { ok: false, error };
+  return { ok: true, state: toPublic(state, sessionUserId) };
+}
+
+/**
  * Helper marks work done → awaiting customer confirmation (not paid/completed yet).
  * Customer cannot use this path to silently finish the job.
+ * Prefers helperArrivedAt so helpers aren't marking done from a bait location.
  */
 export async function completeTask(sessionUserId: string, taskId: string): Promise<MutateResult> {
   let error = "";
@@ -401,6 +453,10 @@ export async function completeTask(sessionUserId: string, taskId: string): Promi
     }
     if (!lockedAmount(task)) {
       error = "Amount not locked.";
+      return;
+    }
+    if (!task.helperArrivedAt) {
+      error = "Confirm arrival at the official pin before marking done.";
       return;
     }
     const now = new Date().toISOString();

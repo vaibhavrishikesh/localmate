@@ -98,7 +98,13 @@ export default function TaskPage() {
 
       {task.status === "looking" && (
         <div style={{ marginTop: 12 }}>
-          <LiveMap areaId={task.area} height={160} showNavigate={user.role === "helper"} />
+          <LiveMap
+            areaId={task.area}
+            toAreaId={task.toArea}
+            height={160}
+            showNavigate={user.role === "helper"}
+            safeHelper={user.role === "helper"}
+          />
         </div>
       )}
 

@@ -5,6 +5,7 @@ import {
   cancelTask,
   completeTask,
   confirmAndReview,
+  confirmArrival,
   confirmCompletion,
   createTask,
   holdPayment,
@@ -23,6 +24,7 @@ import {
 import { backendMode, getActiveUserId } from "@/server/backend";
 import {
   sbAcceptOffer,
+  sbConfirmArrival,
   sbCreateTask,
   sbHoldPayment,
   sbRequestIdentityReview,
@@ -48,6 +50,7 @@ type Body = {
   categories?: CategoryId[];
   task?: NewTaskInput;
   language?: Lang;
+  coords?: { lat: number; lng: number; accuracy?: number | null } | null;
 };
 
 export async function POST(request: Request) {
@@ -88,6 +91,9 @@ export async function POST(request: Request) {
       case "shareLocation":
         if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
         return NextResponse.json(await sbShareLocation(sessionUserId, body.taskId));
+      case "confirmArrival":
+        if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
+        return NextResponse.json(await sbConfirmArrival(sessionUserId, body.taskId, body.coords));
       case "completeTask":
         if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
         return NextResponse.json(
@@ -166,6 +172,9 @@ export async function POST(request: Request) {
     case "shareLocation":
       if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
       return NextResponse.json(await shareLocation(sessionUserId, body.taskId));
+    case "confirmArrival":
+      if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
+      return NextResponse.json(await confirmArrival(sessionUserId, body.taskId, body.coords));
     case "completeTask":
       if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
       return NextResponse.json(await completeTask(sessionUserId, body.taskId));

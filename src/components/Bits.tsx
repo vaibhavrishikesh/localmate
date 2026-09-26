@@ -9,13 +9,20 @@ import {
   kmBetween,
   kmFromPoint,
   localize,
-  mapsDirectionsUrl,
   mapsEmbedUrl,
-  mapsPlaceUrl,
   money,
   tx,
 } from "@/lib/catalog";
 import { useGeo, type GeoState } from "@/lib/geo";
+import {
+  ARRIVAL_RADIUS_M,
+  FAR_FROM_PIN_M,
+  WEAK_ACCURACY_M,
+  lockedDirectionsUrl,
+  lockedPlaceUrl,
+  metersFromPin,
+  pinProximity,
+} from "@/lib/navSafety";
 import { useStore } from "@/lib/store";
 import type { Lang, Task, TaskStatus, User } from "@/lib/types";
 import Link from "next/link";
@@ -174,14 +181,63 @@ export function GeoChip({ geo }: { geo: GeoState }) {
   );
 }
 
-/** Google Maps embed of a meeting point with live distance and one-tap navigation. */
-export function LiveMap({ areaId, height = 220, showNavigate = true }: { areaId: string; height?: number; showNavigate?: boolean }) {
+function proximityLabel(
+  prox: ReturnType<typeof pinProximity>,
+  meters: number | null,
+  t: (en: string, hi: string) => string,
+) {
+  if (prox === "at_pin") {
+    return t(`At official pin (±${ARRIVAL_RADIUS_M} m)`, `आधिकारिक पिन पर (±${ARRIVAL_RADIUS_M} मी)`);
+  }
+  if (prox === "nearby" && meters != null) {
+    return t(`~${Math.round(meters)} m from pin — keep going`, `पिन से ~${Math.round(meters)} मी — आगे बढ़ें`);
+  }
+  if (prox === "far" && meters != null) {
+    const km = (meters / 1000).toFixed(meters >= 1000 ? 1 : 2);
+    return t(`${km} km from official pin — do not follow chat pins`, `आधिकारिक पिन से ${km} km — चैट पिन मत मानो`);
+  }
+  return t("Turn on GPS to verify you are at the pin.", "पिन पर होने की पुष्टि के लिए GPS चालू करें।");
+}
+
+/**
+ * Meeting-point map. When `safeHelper` is on, navigation is locked to catalog
+ * coords only, GPS proximity is shown, and dual meet/drop-off is supported.
+ */
+export function LiveMap({
+  areaId,
+  toAreaId,
+  height = 220,
+  showNavigate = true,
+  safeHelper = false,
+  arrivedAt,
+  onConfirmArrival,
+  confirmingArrival,
+}: {
+  areaId: string;
+  toAreaId?: string;
+  height?: number;
+  showNavigate?: boolean;
+  /** Helper anti-bait mode: locked pin + GPS check + dual nav. */
+  safeHelper?: boolean;
+  arrivedAt?: string;
+  onConfirmArrival?: (coords: { lat: number; lng: number; accuracy: number | null } | null) => void;
+  confirmingArrival?: boolean;
+}) {
   const { lang, t } = useLang();
   const geo = useGeo();
   const area = areaById(areaId);
   const live = geo.status === "live" && geo.lat !== null && geo.lng !== null;
   const km = live ? kmFromPoint(geo.lat!, geo.lng!, areaId) : null;
   const minutes = km !== null ? Math.max(1, Math.round((km / 4.5) * 60)) : null;
+  const meters = live ? metersFromPin(geo.lat!, geo.lng!, areaId) : null;
+  const prox = pinProximity(geo.lat, geo.lng, areaId);
+  const weakGps = live && geo.accuracy != null && geo.accuracy > WEAK_ACCURACY_M;
+  const origin = live ? { originLat: geo.lat!, originLng: geo.lng! } : undefined;
+  const walkUrl = lockedDirectionsUrl(areaId, { ...origin, mode: "walking" });
+  const driveUrl = lockedDirectionsUrl(areaId, { ...origin, mode: "driving" });
+  const dropUrl = toAreaId ? lockedDirectionsUrl(toAreaId, { ...origin, mode: "driving" }) : null;
+  const canConfirmGps = prox === "at_pin" && !weakGps;
+
   return (
     <div className="card flat" style={{ padding: 0, overflow: "hidden" }}>
       <iframe
@@ -195,26 +251,111 @@ export function LiveMap({ areaId, height = 220, showNavigate = true }: { areaId:
         allowFullScreen
       />
       <div className="stack" style={{ padding: 14, gap: 10 }}>
-        <div className="between">
-          <div>
-            <strong>{areaName(areaId, lang)}</strong>
+        <div className="between" style={{ alignItems: "flex-start" }}>
+          <div className="grow">
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <strong>{areaName(areaId, lang)}</strong>
+              {safeHelper && <span className="pill live">{t("Locked pin", "लॉक पिन")}</span>}
+              {arrivedAt && <span className="badge">{t("Arrival confirmed", "पहुँच कन्फ़र्म")}</span>}
+            </div>
             <p className="meta">
-              {km !== null
-                ? t(`${km} km from you · about ${minutes} min on foot`, `आपसे ${km} km · पैदल लगभग ${minutes} मिनट`)
-                : t("Turn on GPS to see how far you are.", "दूरी देखने के लिए GPS चालू करें।")}
+              {safeHelper
+                ? proximityLabel(prox, meters, t)
+                : km !== null
+                  ? t(`${km} km from you · about ${minutes} min on foot`, `आपसे ${km} km · पैदल लगभग ${minutes} मिनट`)
+                  : t("Turn on GPS to see how far you are.", "दूरी देखने के लिए GPS चालू करें।")}
             </p>
+            {safeHelper && (
+              <p className="meta" style={{ marginTop: 4 }}>
+                {t("Official coords", "आधिकारिक निर्देशांक")}: {area.lat.toFixed(5)}, {area.lng.toFixed(5)}
+              </p>
+            )}
           </div>
           <GeoChip geo={geo} />
         </div>
+
+        {safeHelper && prox === "far" && (
+          <p className="note" role="alert">
+            {t(
+              `You are more than ${Math.round(FAR_FROM_PIN_M / 1000 * 10) / 10} km from the task pin. Ignore any new pin from chat, WhatsApp, or SMS — only this map is trusted.`,
+              `आप काम के पिन से ${Math.round(FAR_FROM_PIN_M / 1000 * 10) / 10} km से ज़्यादा दूर हैं। चैट/WhatsApp/SMS का नया पिन न मानें — सिर्फ़ यही मैप भरोसेमंद है।`,
+            )}
+          </p>
+        )}
+        {safeHelper && weakGps && (
+          <p className="info">
+            {t(
+              `GPS accuracy is weak (±${Math.round(geo.accuracy ?? 0)} m). Wait outdoors a few seconds before confirming arrival.`,
+              `GPS कमज़ोर है (±${Math.round(geo.accuracy ?? 0)} मी)। पहुँच कन्फ़र्म से पहले बाहर थोड़ी देर रुकें।`,
+            )}
+          </p>
+        )}
+
         {showNavigate && (
-          <div className="row">
-            <a className="btn primary grow" href={mapsDirectionsUrl(area.lat, area.lng)} target="_blank" rel="noopener noreferrer">
-              <Icon d={ICONS.pin} size={16} />
-              {t("Navigate", "नेविगेट करें")}
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="row" style={{ flexWrap: "wrap" }}>
+              <a className="btn primary grow" href={walkUrl} target="_blank" rel="noopener noreferrer">
+                <Icon d={ICONS.pin} size={16} />
+                {t("Walk to meet pin", "मिलने के पिन तक पैदल")}
+              </a>
+              <a className="btn dark grow" href={driveUrl} target="_blank" rel="noopener noreferrer">
+                {t("Drive / scooter", "गाड़ी / स्कूटर")}
+              </a>
+            </div>
+            {dropUrl && toAreaId && (
+              <a className="btn ghost wide" href={dropUrl} target="_blank" rel="noopener noreferrer">
+                <Icon d={ICONS.pin} size={15} />
+                {t("Then navigate to drop-off", "फिर ड्रॉप-ऑफ़ पर नेविगेट")}: {areaName(toAreaId, lang)}
+              </a>
+            )}
+            <a className="btn ghost small" href={lockedPlaceUrl(areaId)} target="_blank" rel="noopener noreferrer">
+              {t("Open locked pin in Maps", "लॉक पिन Maps में खोलें")}
             </a>
-            <a className="btn ghost" href={mapsPlaceUrl(area.lat, area.lng)} target="_blank" rel="noopener noreferrer">
-              {t("Open in Maps", "Maps में खोलें")}
-            </a>
+          </div>
+        )}
+
+        {safeHelper && onConfirmArrival && !arrivedAt && (
+          <div className="stack" style={{ gap: 8 }}>
+            <button
+              className="btn gold wide"
+              type="button"
+              disabled={confirmingArrival || !canConfirmGps}
+              onClick={() => {
+                if (!live) {
+                  geo.request();
+                  return;
+                }
+                onConfirmArrival({ lat: geo.lat!, lng: geo.lng!, accuracy: geo.accuracy });
+              }}
+            >
+              <Icon d={ICONS.check} size={16} />
+              {canConfirmGps
+                ? t("Confirm: I am at the official pin", "कन्फ़र्म: मैं आधिकारिक पिन पर हूँ")
+                : t("Get within ~200 m of the pin to confirm", "कन्फ़र्म के लिए पिन के ~200 मी अंदर आएँ")}
+            </button>
+            {!live && (
+              <button className="btn ghost wide" type="button" onClick={geo.request}>
+                {t("Turn on GPS first", "पहले GPS चालू करें")}
+              </button>
+            )}
+            {live && prox !== "at_pin" && (
+              <button
+                className="btn ghost wide"
+                type="button"
+                disabled={confirmingArrival}
+                onClick={() => {
+                  const ok = window.confirm(
+                    t(
+                      "GPS does not show you at the official pin. Confirm only if you are physically there (GPS can fail indoors). Never confirm a chat/WhatsApp location instead.",
+                      "GPS आधिकारिक पिन नहीं दिखा रहा। तभी कन्फ़र्म करें जब आप सच में वहाँ हों (अंदर GPS फेल हो सकता है)। चैट/WhatsApp लोकेशन कन्फ़र्म न करें।",
+                    ),
+                  );
+                  if (ok) onConfirmArrival(live ? { lat: geo.lat!, lng: geo.lng!, accuracy: geo.accuracy } : null);
+                }}
+              >
+                {t("Confirm anyway (I am at the pin)", "फिर भी कन्फ़र्म (मैं पिन पर हूँ)")}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -222,11 +363,12 @@ export function LiveMap({ areaId, height = 220, showNavigate = true }: { areaId:
   );
 }
 
-/** Feed map: Google Maps around the helper's live position (or Rishikesh), with task pins listed for navigation. */
+/** Feed map: Google Maps around the helper's live position (or Rishikesh), with locked task pins. */
 export function MapBoard({ tasks, geo }: { tasks: Task[]; geo: GeoState }) {
   const { lang, t } = useLang();
   const live = geo.status === "live" && geo.lat !== null && geo.lng !== null;
   const center = live ? { lat: geo.lat!, lng: geo.lng! } : { lat: 30.122, lng: 78.316 };
+  const origin = live ? { originLat: geo.lat!, originLng: geo.lng! } : undefined;
   return (
     <div className="stack">
       <div className="card flat" style={{ padding: 0, overflow: "hidden" }}>
@@ -246,7 +388,6 @@ export function MapBoard({ tasks, geo }: { tasks: Task[]; geo: GeoState }) {
         </div>
       </div>
       {tasks.map((task) => {
-        const area = areaById(task.area);
         const km = live ? kmFromPoint(geo.lat!, geo.lng!, task.area) : null;
         return (
           <div key={task.id} className="card between">
@@ -254,12 +395,41 @@ export function MapBoard({ tasks, geo }: { tasks: Task[]; geo: GeoState }) {
               <strong style={{ display: "block" }}>{localize(task.title, task.titleHi, lang)}</strong>
               <span className="meta">{areaName(task.area, lang)}{km !== null ? ` · ${km} km` : ""} · {money(task.budget)}</span>
             </Link>
-            <a className="btn dark small" href={mapsDirectionsUrl(area.lat, area.lng)} target="_blank" rel="noopener noreferrer">
+            <a
+              className="btn dark small"
+              href={lockedDirectionsUrl(task.area, origin)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={t("Locked to task pin", "काम के पिन पर लॉक")}
+            >
               {t("Navigate", "नेविगेट")}
             </a>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Sticky anti-bait rules for helpers on active jobs. */
+export function HelperNavRules({ meetLabel, dropLabel }: { meetLabel: string; dropLabel?: string }) {
+  const { t } = useLang();
+  return (
+    <div className="card tint stack" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <Icon d={ICONS.shield} size={18} />
+        <strong>{t("Don’t get fooled — locked meet point", "धोखा न खाएँ — लॉक मिलन बिंदु")}</strong>
+      </div>
+      <p className="sub">
+        {t("Meet only at", "सिर्फ़ यहीं मिलें")}: <strong>{meetLabel}</strong>
+        {dropLabel ? <> → <strong>{dropLabel}</strong></> : null}
+      </p>
+      <ul className="sub" style={{ margin: 0, paddingLeft: 18 }}>
+        <li>{t("Ignore new pins from chat, WhatsApp, SMS, or calls.", "चैट/WhatsApp/SMS/कॉल के नए पिन न मानें।")}</li>
+        <li>{t("Navigate only with the buttons above (catalog coords).", "नेविगेट सिर्फ़ ऊपर वाले बटन से (कैटलॉग निर्देशांक)।")}</li>
+        <li>{t("Confirm arrival on GPS at the official pin before marking done.", "पूरा मार्क करने से पहले आधिकारिक पिन पर GPS पहुँच कन्फ़र्म करें।")}</li>
+        <li>{t("If they push you elsewhere, report / block — don’t go.", "अगर कहीं और बुलाएँ तो रिपोर्ट/ब्लॉक — मत जाएँ।")}</li>
+      </ul>
     </div>
   );
 }

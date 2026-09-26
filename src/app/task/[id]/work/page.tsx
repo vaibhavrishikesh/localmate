@@ -1,6 +1,6 @@
 "use client";
 
-import { Avatar, LiveMap, SafetySheet, StatusPill, StatusSteps } from "@/components/Bits";
+import { Avatar, HelperNavRules, LiveMap, SafetySheet, StatusPill, StatusSteps } from "@/components/Bits";
 import { ICONS, Icon, Shell, useLang } from "@/components/Shell";
 import { areaName, localize } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
@@ -17,6 +17,7 @@ export default function WorkPage() {
     state,
     startTask,
     shareLocation,
+    confirmArrival,
     completeTask,
     confirmCompletion,
     reportTaskProblem,
@@ -25,6 +26,8 @@ export default function WorkPage() {
   const { lang, t } = useLang();
   const [safety, setSafety] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [arriveBusy, setArriveBusy] = useState(false);
+  const [arriveError, setArriveError] = useState("");
   const task = state.tasks.find((item) => item.id === params.id);
   const otherId = task && user ? (user.id === task.customerId ? task.helperId : task.customerId) : undefined;
   const other = state.users.find((item) => item.id === otherId);
@@ -36,6 +39,11 @@ export default function WorkPage() {
   const isHelper = user.id === task.helperId;
   const isCustomer = user.id === task.customerId;
   const chatRestricted = task.status === "flagged" || task.status === "cancelled" || isBlockedPair;
+  const helperNeedsArrival =
+    isHelper &&
+    (task.status === "matched" || task.status === "active") &&
+    !task.helperArrivedAt &&
+    !chatRestricted;
 
   return (
     <Shell>
@@ -75,7 +83,40 @@ export default function WorkPage() {
         <h3>{t("Meeting point", "मिलने की जगह")}</h3>
         <span className="meta">{areaName(task.area, lang)}{task.toArea ? ` → ${areaName(task.toArea, lang)}` : ""}</span>
       </div>
-      <LiveMap areaId={task.area} />
+      <LiveMap
+        areaId={task.area}
+        toAreaId={task.toArea}
+        safeHelper={isHelper && !chatRestricted}
+        showNavigate={isHelper || isCustomer}
+        arrivedAt={task.helperArrivedAt}
+        confirmingArrival={arriveBusy}
+        onConfirmArrival={
+          helperNeedsArrival
+            ? async (coords) => {
+                setArriveError("");
+                setArriveBusy(true);
+                try {
+                  await confirmArrival(task.id, coords);
+                } catch (err) {
+                  setArriveError(err instanceof Error ? err.message : "Failed");
+                } finally {
+                  setArriveBusy(false);
+                }
+              }
+            : undefined
+        }
+      />
+      {arriveError && (
+        <p className="note" role="alert" style={{ marginTop: 8 }}>{arriveError}</p>
+      )}
+      {isHelper && !chatRestricted && (task.status === "matched" || task.status === "active") && (
+        <div style={{ marginTop: 12 }}>
+          <HelperNavRules
+            meetLabel={areaName(task.area, lang)}
+            dropLabel={task.toArea ? areaName(task.toArea, lang) : undefined}
+          />
+        </div>
+      )}
 
       {other && (
         <div className="card row" style={{ marginTop: 12 }}>
@@ -134,21 +175,33 @@ export default function WorkPage() {
             <p className="info">{t("Waiting for the helper to start. You will get an alert.", "हेल्पर के शुरू करने का इंतज़ार। आपको अलर्ट मिलेगा।")}</p>
           )}
           {task.status === "active" && isHelper && canTransition(task, "helper_mark_done", user.id, user.role).ok && (
-            <button
-              className="btn primary wide"
-              type="button"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await completeTask(task.id);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <Icon d={ICONS.check} size={16} /> {t("Mark done — wait for customer", "पूरा मार्क — कस्टमर का इंतज़ार")}
-            </button>
+            <>
+              {!task.helperArrivedAt && (
+                <p className="note" role="alert">
+                  {t(
+                    "Confirm arrival at the official pin (above) before you can mark done. This stops bait locations.",
+                    "पूरा मार्क करने से पहले ऊपर आधिकारिक पिन पर पहुँच कन्फ़र्म करें। इससे फर्जी लोकेशन रुकती है।",
+                  )}
+                </p>
+              )}
+              <button
+                className="btn primary wide"
+                type="button"
+                disabled={busy || !task.helperArrivedAt}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await completeTask(task.id);
+                  } catch (err) {
+                    setArriveError(err instanceof Error ? err.message : "Failed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <Icon d={ICONS.check} size={16} /> {t("Mark done — wait for customer", "पूरा मार्क — कस्टमर का इंतज़ार")}
+              </button>
+            </>
           )}
           {task.status === "active" && isCustomer && (
             <p className="info">{t("Only the helper can mark work done. You will confirm next.", "सिर्फ़ हेल्पर काम पूरा मार्क कर सकता है। फिर आप कन्फ़र्म करेंगे।")}</p>

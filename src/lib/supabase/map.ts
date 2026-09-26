@@ -77,6 +77,7 @@ export function mapTask(row: TaskRow): Task {
     agreedAmount: row.agreed_amount ?? undefined,
     locationShared: row.location_shared,
     createdAt: row.created_at,
+    helperArrivedAt: row.helper_arrived_at ?? undefined,
     helperMarkedDoneAt: row.helper_marked_done_at ?? undefined,
     customerConfirmedAt: row.customer_confirmed_at ?? undefined,
     cancelledAt: row.cancelled_at ?? undefined,

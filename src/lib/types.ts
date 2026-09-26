@@ -121,6 +121,8 @@ export interface Task {
   agreedAmount?: number;
   locationShared: boolean;
   createdAt: string;
+  /** Helper confirmed they reached the official catalog pin (anti-bait). */
+  helperArrivedAt?: string;
   helperMarkedDoneAt?: string;
   customerConfirmedAt?: string;
   cancelledAt?: string;

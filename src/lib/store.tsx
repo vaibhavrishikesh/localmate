@@ -50,6 +50,11 @@ interface Store {
   acceptOffer: (offerId: string) => Promise<void>;
   startTask: (taskId: string) => Promise<void>;
   shareLocation: (taskId: string) => Promise<void>;
+  /** Helper confirms GPS/physical arrival at official catalog pin. */
+  confirmArrival: (
+    taskId: string,
+    coords?: { lat: number; lng: number; accuracy?: number | null } | null,
+  ) => Promise<void>;
   /** Helper marks done → awaiting customer confirmation. */
   completeTask: (taskId: string) => Promise<void>;
   confirmCompletion: (taskId: string) => Promise<void>;
@@ -230,6 +235,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       shareLocation: async (taskId) => {
         await applyMutate({ action: "shareLocation", taskId });
+      },
+      confirmArrival: async (taskId, coords) => {
+        await applyMutate({ action: "confirmArrival", taskId, coords: coords ?? null });
       },
       completeTask: async (taskId) => {
         await applyMutate({ action: "completeTask", taskId });
