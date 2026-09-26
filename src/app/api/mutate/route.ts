@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import {
   acceptOffer,
   blockUser,
+  cancelTask,
   completeTask,
   confirmAndReview,
+  confirmCompletion,
   createTask,
   holdPayment,
   markRead,
+  reportTaskProblem,
   reportUser,
   requestIdentityReview,
   resetDemo,
@@ -15,6 +18,7 @@ import {
   sendOffer,
   shareLocation,
   startTask,
+  unblockUser,
 } from "@/server/actions";
 import { getSessionUserId } from "@/server/session";
 import type { CategoryId, Lang, NewTaskInput } from "@/lib/types";
@@ -29,6 +33,7 @@ type Body = {
   text?: string;
   userId?: string;
   reason?: string;
+  reasonId?: string;
   categories?: CategoryId[];
   task?: NewTaskInput;
   language?: Lang;
@@ -57,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json(await createTask(sessionUserId, body.task));
     case "sendOffer":
       if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
-      return NextResponse.json(await sendOffer(sessionUserId, body.taskId, body.amount ?? 0, body.note ?? ""));
+      return NextResponse.json(await sendOffer(sessionUserId, body.taskId, body.amount ?? NaN, body.note ?? ""));
     case "acceptOffer":
       if (!body.offerId) return NextResponse.json({ ok: false, error: "Missing offerId" }, { status: 400 });
       return NextResponse.json(await acceptOffer(sessionUserId, body.offerId));
@@ -70,6 +75,15 @@ export async function POST(request: Request) {
     case "completeTask":
       if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
       return NextResponse.json(await completeTask(sessionUserId, body.taskId));
+    case "confirmCompletion":
+      if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
+      return NextResponse.json(await confirmCompletion(sessionUserId, body.taskId));
+    case "reportTaskProblem":
+      if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
+      return NextResponse.json(await reportTaskProblem(sessionUserId, body.taskId, body.reason ?? ""));
+    case "cancelTask":
+      if (!body.taskId || !body.reasonId) return NextResponse.json({ ok: false, error: "Missing fields" }, { status: 400 });
+      return NextResponse.json(await cancelTask(sessionUserId, body.taskId, body.reasonId));
     case "holdPayment":
       if (!body.taskId) return NextResponse.json({ ok: false, error: "Missing taskId" }, { status: 400 });
       return NextResponse.json(await holdPayment(sessionUserId, body.taskId));
@@ -86,7 +100,10 @@ export async function POST(request: Request) {
       return NextResponse.json(await reportUser(sessionUserId, body.userId, body.reason, body.taskId));
     case "blockUser":
       if (!body.userId) return NextResponse.json({ ok: false, error: "Missing userId" }, { status: 400 });
-      return NextResponse.json(await blockUser(sessionUserId, body.userId));
+      return NextResponse.json(await blockUser(sessionUserId, body.userId, body.taskId));
+    case "unblockUser":
+      if (!body.userId) return NextResponse.json({ ok: false, error: "Missing userId" }, { status: 400 });
+      return NextResponse.json(await unblockUser(sessionUserId, body.userId));
     case "markRead":
       return NextResponse.json(await markRead(sessionUserId));
     default:

@@ -50,18 +50,24 @@ interface Store {
   acceptOffer: (offerId: string) => Promise<void>;
   startTask: (taskId: string) => Promise<void>;
   shareLocation: (taskId: string) => Promise<void>;
+  /** Helper marks done → awaiting customer confirmation. */
   completeTask: (taskId: string) => Promise<void>;
+  confirmCompletion: (taskId: string) => Promise<void>;
+  reportTaskProblem: (taskId: string, reason: string) => Promise<void>;
+  cancelTask: (taskId: string, reasonId: string) => Promise<void>;
   /** Places locked agreed amount into server hold. Amount is not client-chosen. */
   holdPayment: (taskId: string) => Promise<void>;
   /** @deprecated use holdPayment */
   payTask: (taskId: string) => Promise<void>;
-  /** Customer confirms job → releases hold + saves review. */
+  /** Customer confirms review → releases hold. */
   reviewTask: (taskId: string, stars: number, text: string) => Promise<void>;
   sendMessage: (taskId: string, text: string) => Promise<void>;
   reportUser: (userId: string, reason: string, taskId?: string) => Promise<void>;
-  blockUser: (userId: string) => Promise<void>;
+  blockUser: (userId: string, taskId?: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
   markRead: () => Promise<void>;
   blocked: (userId: string) => boolean;
+  iBlocked: (userId: string) => boolean;
   paymentFor: (taskId: string) => Payment | undefined;
   refresh: () => Promise<void>;
 }
@@ -167,12 +173,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           (block.by === state.sessionUserId && block.userId === userId) ||
           (block.by === userId && block.userId === state.sessionUserId),
       );
+    const iBlocked = (userId: string) =>
+      state.blocks.some((block) => block.by === state.sessionUserId && block.userId === userId);
 
     return {
       ready,
       state,
       user,
       blocked,
+      iBlocked,
       paymentFor: (taskId) => state.payments.find((p) => p.taskId === taskId),
       refresh,
       signIn: async (userId) => {
@@ -225,6 +234,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       completeTask: async (taskId) => {
         await applyMutate({ action: "completeTask", taskId });
       },
+      confirmCompletion: async (taskId) => {
+        await applyMutate({ action: "confirmCompletion", taskId });
+      },
+      reportTaskProblem: async (taskId, reason) => {
+        await applyMutate({ action: "reportTaskProblem", taskId, reason });
+      },
+      cancelTask: async (taskId, reasonId) => {
+        await applyMutate({ action: "cancelTask", taskId, reasonId });
+      },
       holdPayment: async (taskId) => {
         await applyMutate({ action: "holdPayment", taskId });
       },
@@ -240,8 +258,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       reportUser: async (userId, reason, taskId) => {
         await applyMutate({ action: "reportUser", userId, reason, taskId });
       },
-      blockUser: async (userId) => {
-        await applyMutate({ action: "blockUser", userId });
+      blockUser: async (userId, taskId) => {
+        await applyMutate({ action: "blockUser", userId, taskId });
+      },
+      unblockUser: async (userId) => {
+        await applyMutate({ action: "unblockUser", userId });
       },
       markRead: async () => {
         await applyMutate({ action: "markRead" });

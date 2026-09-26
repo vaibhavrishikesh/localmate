@@ -44,20 +44,30 @@ export function statusLabel(status: TaskStatus, lang: Lang) {
     looking: ["Looking", "खोज रहे हैं"],
     matched: ["Matched", "मिल गया"],
     active: ["In progress", "चल रहा है"],
+    awaiting_customer_confirmation: ["Awaiting confirm", "कन्फ़र्म बाकी"],
     pay: ["Pay", "पेमेंट"],
     review: ["Review", "रिव्यू"],
     completed: ["Done", "पूरा"],
+    cancelled: ["Cancelled", "रद्द"],
+    flagged: ["Flagged", "फ़्लैग"],
   };
   return tx(lang, labels[status][0], labels[status][1]);
 }
 
 export function StatusPill({ status }: { status: TaskStatus }) {
   const { lang } = useLang();
-  const tone = status === "looking" || status === "review" ? "wait" : status === "completed" ? "done" : "live";
+  const tone =
+    status === "looking" || status === "review" || status === "awaiting_customer_confirmation"
+      ? "wait"
+      : status === "completed"
+        ? "done"
+        : status === "cancelled" || status === "flagged"
+          ? "wait"
+          : "live";
   return <span className={`pill ${tone}`}>{statusLabel(status, lang)}</span>;
 }
 
-const ORDER: TaskStatus[] = ["matched", "active", "pay", "review", "completed"];
+const ORDER: TaskStatus[] = ["matched", "active", "awaiting_customer_confirmation", "pay", "review", "completed"];
 
 export function StatusSteps({ status }: { status: TaskStatus }) {
   const { lang } = useLang();
@@ -263,9 +273,11 @@ export function SafetySheet({
   taskId?: string;
   onClose: () => void;
 }) {
-  const { reportUser, blockUser } = useStore();
+  const { reportUser, blockUser, unblockUser, iBlocked } = useStore();
   const { t } = useLang();
   const [sent, setSent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const alreadyBlocked = iBlocked(userId);
   const reasons = [
     [t("No-show", "नहीं आया"), "No-show"],
     [t("Unsafe behaviour", "असुरक्षित व्यवहार"), "Unsafe behaviour"],
@@ -278,6 +290,9 @@ export function SafetySheet({
       <div className="panel stack" onClick={(event) => event.stopPropagation()}>
         <h2 className="display" style={{ fontSize: 26 }}>{t("Safety", "सुरक्षा")}</h2>
         <p className="sub">{t("If you feel unsafe, leave and call local emergency services.", "अगर असुरक्षित लगे, तो काम छोड़ें और इमरजेंसी नंबर पर कॉल करें।")}</p>
+        {alreadyBlocked && (
+          <p className="note" role="status">{t("You have blocked this person. Chat and new offers are blocked both ways.", "आपने इस व्यक्ति को ब्लॉक किया है। चैट और नए ऑफ़र दोनों तरफ बंद हैं।")}</p>
+        )}
         <div className="row">
           <a className="btn danger grow" href="tel:112">{t("Call 112", "112 पर कॉल करें")}</a>
           <a className="btn ghost grow" href="tel:108">{t("Ambulance 108", "एम्बुलेंस 108")}</a>
@@ -298,17 +313,50 @@ export function SafetySheet({
             </button>
           ))}
         </div>
-        {sent && <p className="ok">{t("Report sent to LocalMate.", "रिपोर्ट LocalMate को भेज दी गई।")}</p>}
-        <button
-          type="button"
-          className="btn dark wide"
-          onClick={async () => {
-            await blockUser(userId);
-            onClose();
-          }}
-        >
-          {t("Block this person", "इस व्यक्ति को ब्लॉक करें")}
-        </button>
+        {sent && <p className="ok">{t("Report sent to LocalMate. (Simulated in-app)", "रिपोर्ट LocalMate को भेज दी गई। (सिम्युलेटेड)")}</p>}
+        {alreadyBlocked ? (
+          <button
+            type="button"
+            className="btn dark wide"
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm(t("Unblock this person?", "इस व्यक्ति को अनब्लॉक करें?"))) return;
+              setBusy(true);
+              try {
+                await unblockUser(userId);
+                onClose();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {t("Unblock", "अनब्लॉक")}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn danger wide"
+            disabled={busy}
+            onClick={async () => {
+              const ok = window.confirm(
+                t(
+                  "Block this person? They cannot message you or apply to your tasks. If you share an active task, it will be flagged for safety review — not auto-completed or paid.",
+                  "ब्लॉक करें? वे मैसेज या आपके काम पर अप्लाई नहीं कर सकेंगे। अगर चालू काम है तो सेफ्टी रिव्यू के लिए फ़्लैग होगा — ऑटो-कम्प्लीट/पेमेंट नहीं।",
+                ),
+              );
+              if (!ok) return;
+              setBusy(true);
+              try {
+                await blockUser(userId, taskId);
+                onClose();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {t("Block this person", "इस व्यक्ति को ब्लॉक करें")}
+          </button>
+        )}
         <button type="button" className="btn ghost wide" onClick={onClose}>{t("Close", "बंद करें")}</button>
       </div>
     </div>

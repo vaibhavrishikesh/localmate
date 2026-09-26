@@ -17,7 +17,16 @@ export type Lang =
   | "ko";
 export type Role = "customer" | "helper";
 export type PriceMode = "fixed" | "negotiable";
-export type TaskStatus = "looking" | "matched" | "active" | "pay" | "review" | "completed";
+export type TaskStatus =
+  | "looking"
+  | "matched"
+  | "active"
+  | "awaiting_customer_confirmation"
+  | "pay"
+  | "review"
+  | "completed"
+  | "cancelled"
+  | "flagged";
 
 export type CategoryId =
   | "accommodation"
@@ -112,6 +121,13 @@ export interface Task {
   agreedAmount?: number;
   locationShared: boolean;
   createdAt: string;
+  helperMarkedDoneAt?: string;
+  customerConfirmedAt?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  cancelledBy?: string;
+  flaggedAt?: string;
+  flagReason?: string;
 }
 
 export interface ChatMessage {

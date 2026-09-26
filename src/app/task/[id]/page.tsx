@@ -4,6 +4,7 @@ import { Avatar, LiveMap, SafetySheet, StatusPill, TrustLine } from "@/component
 import { ICONS, Icon, Shell, useLang } from "@/components/Shell";
 import { areaName, categoryById, categoryLabel, isClearedHelper, localize, money, openJobCount, splitFee, workerBlock, type WorkerBlock } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
+import { CANCEL_REASONS, canTransition, MIN_OFFER_INR, offerErrorMessage, validateOfferAmount } from "@/lib/workflow";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -11,12 +12,14 @@ import { useState } from "react";
 export default function TaskPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { user, state, sendOffer, acceptOffer, blocked } = useStore();
+  const { user, state, sendOffer, acceptOffer, blocked, cancelTask } = useStore();
   const { lang, t } = useLang();
-  const [amount, setAmount] = useState(0);
+  const [amount, setAmount] = useState("");
+  const [offerError, setOfferError] = useState("");
   const [safety, setSafety] = useState(false);
   const [hidden, setHidden] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const task = state.tasks.find((item) => item.id === params.id);
 
   if (!task || !user) {
@@ -44,10 +47,12 @@ export default function TaskPage() {
   const when = lang === "hi" && task.whenLabelHi ? task.whenLabelHi : task.whenLabel;
   const route = task.toArea ? `${areaName(task.area, lang)} → ${areaName(task.toArea, lang)}` : areaName(task.area, lang);
   const other = user.id === task.customerId ? helper : customer;
-  const offerAmount = amount || task.budget;
+  const parsedOffer = amount === "" ? NaN : Number(amount);
+  const offerAmount = task.priceMode === "fixed" ? task.budget : parsedOffer;
+  const offerCheck = validateOfferAmount(task.priceMode === "fixed" ? task.budget : parsedOffer, task);
   const isOwner = user.id === task.customerId;
   const gate: WorkerBlock | null = user.role === "helper"
-    ? workerBlock(user, task, offerAmount, openJobCount(state.tasks, state.offers, user.id, task.id))
+    ? workerBlock(user, task, offerCheck.ok ? offerCheck.amount : task.budget, openJobCount(state.tasks, state.offers, user.id, task.id))
     : null;
   const gateCopy: Record<WorkerBlock, string> = {
     setup: t("Finish worker setup before you can take this.", "यह काम लेने से पहले वर्कर सेटअप पूरा करें।"),
@@ -55,9 +60,15 @@ export default function TaskPage() {
     category: t("This task is outside the work you are cleared for.", "यह काम आपकी क्लीयर कैटेगरी से बाहर है।"),
     amount: t("New workers can only take tasks up to ₹1,000.", "नए वर्कर सिर्फ़ ₹1,000 तक के काम ले सकते हैं।"),
     busy: t("Finish your open task before taking another. New workers get one at a time.", "दूसरा काम लेने से पहले खुला काम पूरा करें। नए वर्कर एक बार में एक काम लेते हैं।"),
-    low: t("Offers start at ₹50.", "ऑफ़र ₹50 से शुरू होते हैं।"),
+    low: t(`Offers start at ₹${MIN_OFFER_INR}.`, `ऑफ़र ₹${MIN_OFFER_INR} से शुरू होते हैं।`),
   };
-  const earn = splitFee(offerAmount);
+  const earn = splitFee(offerCheck.ok ? offerCheck.amount : task.budget);
+  const canCancel = canTransition(task, "cancel", user.id, user.role).ok;
+  const chatOk =
+    task.status !== "looking" &&
+    task.status !== "cancelled" &&
+    task.status !== "flagged" &&
+    !(other && blocked(other.id));
 
   return (
     <Shell>
@@ -124,6 +135,10 @@ export default function TaskPage() {
       )}
 
       <div className="stack" style={{ marginTop: 16 }}>
+        {task.status === "looking" && user.role === "helper" && !isOwner && blocked(task.customerId) && (
+          <p className="note" role="alert">{t("You cannot apply — you and this customer are blocked.", "अप्लाई नहीं कर सकते — आप और यह कस्टमर ब्लॉक हैं।")}</p>
+        )}
+
         {task.status === "looking" && user.role === "helper" && !isOwner && !blocked(task.customerId) && (
           mine ? (
             <div className="card tint stack" style={{ gap: 6 }}>
@@ -146,35 +161,82 @@ export default function TaskPage() {
               <h3>{task.priceMode === "fixed" ? t("Apply for this task", "इस काम के लिए अप्लाई करें") : t("Make an offer", "ऑफ़र दें")}</h3>
               {task.priceMode === "negotiable" && (
                 <label className="field">
-                  <span>{t("Your price", "आपकी कीमत")}</span>
+                  <span>{t("Your price (₹)", "आपकी कीमत (₹)")}</span>
                   <div className="money-input">
-                    <input type="number" min={50} value={offerAmount} onChange={(event) => setAmount(Number(event.target.value))} aria-describedby="earn" />
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={MIN_OFFER_INR}
+                      max={task.budget}
+                      step={1}
+                      value={amount}
+                      onChange={(event) => {
+                        setAmount(event.target.value);
+                        setOfferError("");
+                      }}
+                      aria-invalid={Boolean(offerError)}
+                      aria-describedby="earn offer-err"
+                    />
                   </div>
-                  <span className="help" id="earn">{t(`Customer budget ${money(task.budget)}`, `कस्टमर का बजट ${money(task.budget)}`)}</span>
+                  <span className="help" id="earn">
+                    {t(`Min ₹${MIN_OFFER_INR} · max budget ${money(task.budget)}`, `न्यूनतम ₹${MIN_OFFER_INR} · अधिकतम बजट ${money(task.budget)}`)}
+                  </span>
                 </label>
+              )}
+              {task.priceMode === "fixed" && (
+                <p className="meta">{t(`Fixed amount ${money(task.budget)} — you accept this price.`, `फिक्स्ड ${money(task.budget)} — यही कीमत स्वीकार होगी।`)}</p>
               )}
               <div className="split">
                 <div><span>{t("Task amount", "काम की रकम")}</span><strong>{money(earn.total)}</strong></div>
                 <div><span>{t("LocalMate fee 10%", "LocalMate फ़ीस 10%")}</span><span>− {money(earn.fee)}</span></div>
                 <div className="total"><span>{t("You receive", "आपको मिलेंगे")}</span><strong style={{ color: "var(--green)" }}>{money(earn.helper)}</strong></div>
               </div>
+              {offerError && <p className="note" role="alert" id="offer-err">{offerError}</p>}
               <button
                 className="btn primary wide"
                 type="button"
-                disabled={sending}
+                disabled={sending || (task.priceMode === "negotiable" && !offerCheck.ok)}
                 onClick={async () => {
+                  if (sending) return;
+                  const check = validateOfferAmount(task.priceMode === "fixed" ? task.budget : parsedOffer, task);
+                  if (!check.ok) {
+                    setOfferError(offerErrorMessage(check.error, lang === "hi" ? "hi" : "en", task.budget));
+                    return;
+                  }
                   setSending(true);
+                  setOfferError("");
                   try {
-                    await sendOffer(task.id, offerAmount, "I can do this");
+                    await sendOffer(task.id, check.amount, "I can do this");
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : "";
+                    if (msg.startsWith("offer:")) {
+                      const code = msg.slice(6) as Parameters<typeof offerErrorMessage>[0];
+                      setOfferError(offerErrorMessage(code, lang === "hi" ? "hi" : "en", task.budget));
+                    } else {
+                      setOfferError(t("Could not send offer.", "ऑफ़र नहीं भेजा जा सका।"));
+                    }
                   } finally {
                     setSending(false);
                   }
                 }}
               >
-                {sending ? t("Sending…", "भेज रहे हैं…") : task.priceMode === "fixed" ? t("I can do this", "मैं यह कर सकता हूँ") : t(`Send offer · ${money(offerAmount)}`, `ऑफ़र भेजें · ${money(offerAmount)}`)}
+                {sending
+                  ? t("Sending…", "भेज रहे हैं…")
+                  : task.priceMode === "fixed"
+                    ? t("I can do this", "मैं यह कर सकता हूँ")
+                    : t(`Send offer · ${money(offerCheck.ok ? offerCheck.amount : 0)}`, `ऑफ़र भेजें · ${money(offerCheck.ok ? offerCheck.amount : 0)}`)}
               </button>
             </div>
           )
+        )}
+
+        {(task.status === "cancelled" || task.status === "flagged") && (
+          <div className="card stack">
+            <strong>{task.status === "cancelled" ? t("Task cancelled", "काम रद्द") : t("Task flagged for safety review", "सेफ्टी रिव्यू के लिए फ़्लैग")}</strong>
+            {task.cancelReason && <p className="meta">{task.cancelReason}</p>}
+            {task.flagReason && <p className="meta">{task.flagReason}</p>}
+            {task.cancelledAt && <p className="meta">{new Date(task.cancelledAt).toLocaleString()}</p>}
+          </div>
         )}
 
         {task.status === "looking" && isOwner && (
@@ -227,15 +289,46 @@ export default function TaskPage() {
           </>
         )}
 
-        {task.status !== "looking" && (isOwner || user.id === task.helperId) && (
+        {task.status !== "looking" && task.status !== "cancelled" && (isOwner || user.id === task.helperId) && (
           <div className="stack">
-            {(task.status === "matched" || task.status === "active") && (
+            {(task.status === "matched" || task.status === "active" || task.status === "awaiting_customer_confirmation" || task.status === "flagged") && (
               <Link className="btn primary wide" href={`/task/${task.id}/work`}><Icon d={ICONS.pin} size={16} /> {t("Open active task", "चालू काम खोलें")}</Link>
             )}
-            <Link className="btn dark wide" href={`/task/${task.id}/chat`}><Icon d={ICONS.chat} size={16} /> {t("Open chat", "चैट खोलें")}</Link>
+            {chatOk && <Link className="btn dark wide" href={`/task/${task.id}/chat`}><Icon d={ICONS.chat} size={16} /> {t("Open chat", "चैट खोलें")}</Link>}
             {task.status === "pay" && <Link className="btn gold wide" href={`/task/${task.id}/pay`}>{t("Payment", "पेमेंट")}</Link>}
             {task.status === "review" && <Link className="btn gold wide" href={`/task/${task.id}/review`}>{t("Rating", "रेटिंग")}</Link>}
           </div>
+        )}
+
+        {canCancel && (
+          <button
+            className="btn ghost wide"
+            type="button"
+            disabled={cancelling}
+            onClick={async () => {
+              const labels = CANCEL_REASONS.map((r, i) => `${i + 1}. ${lang === "hi" ? r.hi : r.en}`).join("\n");
+              const pick = window.prompt(
+                t("Cancel this task?\nPick a reason number:\n", "काम रद्द?\nकारण नंबर चुनें:\n") + labels,
+                "1",
+              );
+              if (!pick) return;
+              const index = Number(pick) - 1;
+              const reason = CANCEL_REASONS[index];
+              if (!reason) {
+                window.alert(t("Invalid reason.", "गलत कारण।"));
+                return;
+              }
+              if (!window.confirm(t("Confirm cancel? The other person will be notified.", "रद्द कन्फ़र्म? दूसरे व्यक्ति को अलर्ट मिलेगा।"))) return;
+              setCancelling(true);
+              try {
+                await cancelTask(task.id, reason.id);
+              } finally {
+                setCancelling(false);
+              }
+            }}
+          >
+            {cancelling ? t("Cancelling…", "रद्द हो रहा है…") : t("Cancel task", "काम रद्द करें")}
+          </button>
         )}
 
         {other && (

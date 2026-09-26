@@ -23,8 +23,8 @@ export default function MyTasksPage() {
     .map((offer) => state.tasks.find((task) => task.id === offer.taskId))
     .filter((task): task is Task => Boolean(task && task.status === "looking"));
   const all = user.role === "helper" ? jobs : posted;
-  const open = all.filter((task) => task.status !== "completed");
-  const done = all.filter((task) => task.status === "completed");
+  const open = all.filter((task) => task.status !== "completed" && task.status !== "cancelled");
+  const done = all.filter((task) => task.status === "completed" || task.status === "cancelled" || task.status === "flagged");
   const list = tab === "open" ? open : done;
   const isHelper = user.role === "helper";
 

@@ -6,8 +6,10 @@ import type { ServerState, ServerUser } from "./types";
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DATA_DIR, "localmate-db.json");
 
-let queue: Promise<unknown> = Promise.resolve();
-let cache: ServerState | null = null;
+const g = globalThis as typeof globalThis & { __localmateDb?: ServerState; __localmateQueue?: Promise<unknown> };
+
+let queue: Promise<unknown> = g.__localmateQueue ?? Promise.resolve();
+g.__localmateQueue = queue;
 
 function withIdentity(users: ReturnType<typeof seedState>["users"]): ServerUser[] {
   return users.map((user) => ({
@@ -44,15 +46,15 @@ function seedServer(): ServerState {
 }
 
 async function ensureLoaded(): Promise<ServerState> {
-  if (cache) return cache;
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  if (g.__localmateDb) return g.__localmateDb;
   try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
     const raw = await fs.readFile(DB_FILE, "utf8");
     const parsed = JSON.parse(raw) as ServerState;
     if (!parsed.users || !parsed.tasks || !Array.isArray(parsed.payments)) {
-      cache = seedServer();
+      g.__localmateDb = seedServer();
     } else {
-      cache = {
+      g.__localmateDb = {
         ...parsed,
         payments: parsed.payments ?? [],
         users: parsed.users.map((user) => ({
@@ -62,16 +64,25 @@ async function ensureLoaded(): Promise<ServerState> {
       };
     }
   } catch {
-    cache = seedServer();
-    await fs.writeFile(DB_FILE, JSON.stringify(cache, null, 2), "utf8");
+    g.__localmateDb = seedServer();
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(DB_FILE, JSON.stringify(g.__localmateDb, null, 2), "utf8");
+    } catch {
+      // Read-only / serverless — keep in-memory only
+    }
   }
-  return cache!;
+  return g.__localmateDb!;
 }
 
 async function persist(state: ServerState) {
-  cache = state;
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(DB_FILE, JSON.stringify(state, null, 2), "utf8");
+  g.__localmateDb = state;
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(DB_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch {
+    // Serverless filesystems are ephemeral/read-only — memory is the source of truth.
+  }
 }
 
 export function runExclusive<T>(fn: (state: ServerState) => Promise<T> | T): Promise<T> {
@@ -83,6 +94,7 @@ export function runExclusive<T>(fn: (state: ServerState) => Promise<T> | T): Pro
     () => undefined,
     () => undefined,
   );
+  g.__localmateQueue = queue;
   return next;
 }
 

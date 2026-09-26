@@ -18,7 +18,7 @@ const QUICK = [
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { user, state, sendMessage } = useStore();
+  const { user, state, sendMessage, blocked } = useStore();
   const { lang, t } = useLang();
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -52,10 +52,20 @@ export default function ChatPage() {
         <h2 className="display">{t("Chat", "चैट")}</h2>
       )}
 
-      {!task || task.status === "looking" ? (
+      {!task || task.status === "looking" || task.status === "cancelled" ? (
         <div className="empty" style={{ marginTop: 20 }}>
           <span className="glyph" aria-hidden="true">💬</span>
-          <strong>{t("Chat opens after you accept someone.", "किसी को स्वीकार करने के बाद चैट खुलेगी।")}</strong>
+          <strong>
+            {task?.status === "cancelled"
+              ? t("Chat closed — task cancelled.", "चैट बंद — काम रद्द।")
+              : t("Chat opens after you accept someone.", "किसी को स्वीकार करने के बाद चैट खुलेगी।")}
+          </strong>
+        </div>
+      ) : task.status === "flagged" || (other && user && blocked(other.id)) ? (
+        <div className="empty" style={{ marginTop: 20 }}>
+          <span className="glyph" aria-hidden="true">🔒</span>
+          <strong>{t("Chat restricted for safety.", "सेफ्टी के लिए चैट बंद है।")}</strong>
+          <p className="meta">{t("Use Report / block controls on the task. No messages can be sent.", "काम पर रिपोर्ट/ब्लॉक इस्तेमाल करें। मैसेज नहीं भेज सकते।")}</p>
         </div>
       ) : (
         <>

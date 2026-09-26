@@ -1,5 +1,6 @@
-import type { CategoryId, Lang, User } from "./types";
+import type { CategoryId, Lang, TaskStatus, User } from "./types";
 import { uiText } from "./i18n";
+import { countsAsOpenJob, MIN_OFFER_INR } from "./workflow";
 
 export const NEW_HELPER_TASKS = 5;
 export const NEW_HELPER_CAP = 1000;
@@ -322,7 +323,9 @@ export function openJobCount(
   ignoreTaskId?: string,
 ) {
   const active = tasks.filter(
-    (task) => task.helperId === helperId && task.status !== "completed" && task.status !== "looking",
+    (task) =>
+      task.helperId === helperId &&
+      countsAsOpenJob((task.status as TaskStatus) || "looking"),
   ).length;
   const pending = offers.filter((offer) => {
     if (offer.helperId !== helperId || offer.taskId === ignoreTaskId) return false;
@@ -342,7 +345,7 @@ export function workerBlock(
   if (!user.identityVerified) return "id";
   if (!workerCategories(user).includes(task.category)) return "category";
   const price = task.priceMode === "fixed" ? task.budget : amount;
-  if (!Number.isFinite(price) || price < 50) return "low";
+  if (!Number.isFinite(price) || price < MIN_OFFER_INR) return "low";
   const newbie = user.tasksCompleted < NEW_HELPER_TASKS;
   if (newbie && price > NEW_HELPER_CAP) return "amount";
   if (openCount >= (newbie ? 1 : 3)) return "busy";
@@ -350,7 +353,7 @@ export function workerBlock(
 }
 
 export function taskHref(status: string, id: string) {
-  if (status === "active") return `/task/${id}/work`;
+  if (status === "active" || status === "awaiting_customer_confirmation" || status === "flagged") return `/task/${id}/work`;
   if (status === "pay") return `/task/${id}/pay`;
   if (status === "review") return `/task/${id}/review`;
   if (status === "matched") return `/task/${id}/chat`;

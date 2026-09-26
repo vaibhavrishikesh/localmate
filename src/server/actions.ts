@@ -9,6 +9,15 @@ import {
   workerBlock,
 } from "@/lib/catalog";
 import type { Lang, Role, Task } from "@/lib/types";
+import {
+  canTransition,
+  isCancelReason,
+  isChatOpen,
+  isOpenForOffers,
+  nextStatus,
+  validateOfferAmount,
+  type CancelReasonId,
+} from "@/lib/workflow";
 import { resetDatabase, readState, updateState } from "./db";
 import type {
   MutateResult,
@@ -209,7 +218,7 @@ export async function sendOffer(
       error = "Not allowed.";
       return;
     }
-    if (task.status !== "looking" || task.customerId === user.id) {
+    if (!isOpenForOffers(task.status) || task.customerId === user.id) {
       error = "Task not open.";
       return;
     }
@@ -217,18 +226,28 @@ export async function sendOffer(
       error = "Blocked.";
       return;
     }
+
+    const validated =
+      task.priceMode === "fixed"
+        ? validateOfferAmount(task.budget, task)
+        : validateOfferAmount(amount, task);
+    if (!validated.ok) {
+      error = `offer:${validated.error}`;
+      return;
+    }
+
     const openCount = openJobCount(draft.tasks, draft.offers, user.id, taskId);
-    if (workerBlock(user, task, amount, openCount)) {
+    if (workerBlock(user, task, validated.amount, openCount)) {
       error = "Worker blocked for this task.";
       return;
     }
-    const offerAmount = task.priceMode === "fixed" ? task.budget : amount;
+
     draft.offers = draft.offers.filter((item) => !(item.taskId === taskId && item.helperId === user.id));
     draft.offers.unshift({
       id: uid(),
       taskId,
       helperId: user.id,
-      amount: offerAmount,
+      amount: validated.amount,
       note: note.trim() || "I can do this",
       createdAt: new Date().toISOString(),
     });
@@ -236,8 +255,8 @@ export async function sendOffer(
       userId: task.customerId,
       titleEn: `${user.name.split(" ")[0]} wants to help with your task.`,
       titleHi: `${user.name.split(" ")[0]} आपके काम में मदद करना चाहता है।`,
-      bodyEn: `${user.rating ? user.rating.toFixed(1) : "New"} · ${user.tasksCompleted} tasks · ${user.responseRate}% response`,
-      bodyHi: `${user.rating ? user.rating.toFixed(1) : "नए"} · ${user.tasksCompleted} काम · ${user.responseRate}% जवाब`,
+      bodyEn: `${money(validated.amount)} · ${user.rating ? user.rating.toFixed(1) : "New"} · ${user.tasksCompleted} tasks`,
+      bodyHi: `${money(validated.amount)} · ${user.rating ? user.rating.toFixed(1) : "नए"} · ${user.tasksCompleted} काम`,
       href: `/task/${taskId}`,
     });
   });
@@ -256,31 +275,45 @@ export async function acceptOffer(sessionUserId: string, offerId: string): Promi
     }
     const task = draft.tasks.find((item) => item.id === offer.taskId);
     const helper = userById(draft, offer.helperId);
-    if (!task || !helper || task.customerId !== user.id || task.status !== "looking") {
+    if (!task || !helper || task.customerId !== user.id || !isOpenForOffers(task.status)) {
       error = "Cannot accept.";
+      return;
+    }
+    if (isBlocked(draft, user.id, helper.id)) {
+      error = "Blocked.";
+      return;
+    }
+    const amountCheck = validateOfferAmount(offer.amount, task);
+    if (!amountCheck.ok) {
+      error = `offer:${amountCheck.error}`;
       return;
     }
     if (!isClearedHelper(helper)) {
       error = "Helper not cleared.";
       return;
     }
-    if (workerBlock(helper, task, offer.amount, openJobCount(draft.tasks, draft.offers, helper.id, task.id))) {
+    if (workerBlock(helper, task, amountCheck.amount, openJobCount(draft.tasks, draft.offers, helper.id, task.id))) {
       error = "Helper blocked.";
+      return;
+    }
+    const gate = canTransition(task, "accept_offer", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
       return;
     }
     // Lock amount on the server — clients cannot rewrite later.
     patchTask(draft, task.id, {
-      status: "matched",
+      status: nextStatus("accept_offer"),
       helperId: helper.id,
-      agreedAmount: offer.amount,
+      agreedAmount: amountCheck.amount,
     });
     systemMessage(draft, task.id);
     notify(draft, {
       userId: helper.id,
       titleEn: `${user.name.split(" ")[0]} accepted you.`,
       titleHi: `${user.name.split(" ")[0]} ने आपको चुन लिया।`,
-      bodyEn: `${task.title} · ${money(offer.amount)}`,
-      bodyHi: `${task.titleHi || task.title} · ${money(offer.amount)}`,
+      bodyEn: `${task.title} · ${money(amountCheck.amount)}`,
+      bodyHi: `${task.titleHi || task.title} · ${money(amountCheck.amount)}`,
       href: `/task/${task.id}/chat`,
     });
   });
@@ -293,11 +326,20 @@ export async function startTask(sessionUserId: string, taskId: string): Promise<
   const state = await updateState((draft) => {
     const user = userById(draft, sessionUserId);
     const task = draft.tasks.find((item) => item.id === taskId);
-    if (!user || !task || task.status !== "matched" || task.helperId !== user.id || !isClearedHelper(user)) {
+    if (!user || !task || !isClearedHelper(user)) {
       error = "Cannot start.";
       return;
     }
-    patchTask(draft, taskId, { status: "active" });
+    if (isBlocked(draft, task.customerId, user.id)) {
+      error = "Blocked.";
+      return;
+    }
+    const gate = canTransition(task, "start", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    patchTask(draft, taskId, { status: nextStatus("start") });
     notify(draft, {
       userId: task.customerId,
       titleEn: `${user.name.split(" ")[0]} started your task.`,
@@ -324,38 +366,175 @@ export async function shareLocation(sessionUserId: string, taskId: string): Prom
       error = "Not a party.";
       return;
     }
+    const otherId = task.customerId === user.id ? task.helperId : task.customerId;
+    if (otherId && isBlocked(draft, user.id, otherId)) {
+      error = "Blocked.";
+      return;
+    }
     patchTask(draft, taskId, { locationShared: true });
   });
   if (error) return { ok: false, error };
   return { ok: true, state: toPublic(state, sessionUserId) };
 }
 
+/**
+ * Helper marks work done → awaiting customer confirmation (not paid/completed yet).
+ * Customer cannot use this path to silently finish the job.
+ */
 export async function completeTask(sessionUserId: string, taskId: string): Promise<MutateResult> {
   let error = "";
   const state = await updateState((draft) => {
     const user = userById(draft, sessionUserId);
     const task = draft.tasks.find((item) => item.id === taskId);
-    if (!user || !task || task.status !== "active") {
-      error = "Not active.";
+    if (!user || !task) {
+      error = "Not found.";
       return;
     }
-    if (task.customerId !== user.id && task.helperId !== user.id) {
-      error = "Not a party.";
+    if (isBlocked(draft, task.customerId, task.helperId ?? "")) {
+      error = "Blocked — task is restricted.";
+      return;
+    }
+    const gate = canTransition(task, "helper_mark_done", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
       return;
     }
     if (!lockedAmount(task)) {
       error = "Amount not locked.";
       return;
     }
-    patchTask(draft, taskId, { status: "pay" });
+    const now = new Date().toISOString();
+    patchTask(draft, taskId, {
+      status: nextStatus("helper_mark_done"),
+      helperMarkedDoneAt: now,
+    });
     notify(draft, {
       userId: task.customerId,
-      titleEn: "Task marked done. Place payment in hold.",
-      titleHi: "काम पूरा हुआ। पेमेंट होल्ड में डालें।",
-      bodyEn: task.title,
-      bodyHi: task.titleHi || task.title,
+      titleEn: "Helper marked the task done — please confirm.",
+      titleHi: "हेल्पर ने काम पूरा मार्क किया — कृपया कन्फ़र्म करें।",
+      bodyEn: `${task.title} · Simulated in-app alert`,
+      bodyHi: `${task.titleHi || task.title} · सिम्युलेटेड इन-ऐप अलर्ट`,
+      href: `/task/${taskId}/work`,
+    });
+  });
+  if (error) return { ok: false, error };
+  return { ok: true, state: toPublic(state, sessionUserId) };
+}
+
+/** Customer confirms helper's completion → opens payment hold step. */
+export async function confirmCompletion(sessionUserId: string, taskId: string): Promise<MutateResult> {
+  let error = "";
+  const state = await updateState((draft) => {
+    const user = userById(draft, sessionUserId);
+    const task = draft.tasks.find((item) => item.id === taskId);
+    if (!user || !task || !task.helperId) {
+      error = "Not found.";
+      return;
+    }
+    const gate = canTransition(task, "customer_confirm_done", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    const now = new Date().toISOString();
+    patchTask(draft, taskId, {
+      status: nextStatus("customer_confirm_done"),
+      customerConfirmedAt: now,
+    });
+    notify(draft, {
+      userId: task.helperId,
+      titleEn: "Customer confirmed completion. Awaiting payment hold.",
+      titleHi: "कस्टमर ने पूरा होना कन्फ़र्म किया। पेमेंट होल्ड का इंतज़ार।",
+      bodyEn: `${task.title} · Simulated in-app alert`,
+      bodyHi: `${task.titleHi || task.title} · सिम्युलेटेड इन-ऐप अलर्ट`,
       href: `/task/${taskId}/pay`,
     });
+  });
+  if (error) return { ok: false, error };
+  return { ok: true, state: toPublic(state, sessionUserId) };
+}
+
+/** Customer reports a problem instead of confirming — flags for review, does not pay. */
+export async function reportTaskProblem(sessionUserId: string, taskId: string, reason: string): Promise<MutateResult> {
+  let error = "";
+  const state = await updateState((draft) => {
+    const user = userById(draft, sessionUserId);
+    const task = draft.tasks.find((item) => item.id === taskId);
+    if (!user || !task || !task.helperId) {
+      error = "Not found.";
+      return;
+    }
+    const gate = canTransition(task, "customer_report_problem", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    const note = reason.trim() || "Problem reported";
+    patchTask(draft, taskId, {
+      status: nextStatus("customer_report_problem"),
+      flaggedAt: new Date().toISOString(),
+      flagReason: note,
+    });
+    draft.reports.unshift({
+      id: uid(),
+      by: sessionUserId,
+      userId: task.helperId,
+      taskId,
+      reason: note,
+      createdAt: new Date().toISOString(),
+    });
+    notify(draft, {
+      userId: task.helperId,
+      titleEn: "Customer reported a problem. Task flagged — no payment yet.",
+      titleHi: "कस्टमर ने समस्या बताई। काम फ़्लैग — अभी पेमेंट नहीं।",
+      bodyEn: note,
+      bodyHi: note,
+      href: `/task/${taskId}/work`,
+    });
+  });
+  if (error) return { ok: false, error };
+  return { ok: true, state: toPublic(state, sessionUserId) };
+}
+
+export async function cancelTask(
+  sessionUserId: string,
+  taskId: string,
+  reasonId: string,
+): Promise<MutateResult> {
+  if (!isCancelReason(reasonId)) return { ok: false, error: "Pick a cancellation reason." };
+  let error = "";
+  const state = await updateState((draft) => {
+    const user = userById(draft, sessionUserId);
+    const task = draft.tasks.find((item) => item.id === taskId);
+    if (!user || !task) {
+      error = "Not found.";
+      return;
+    }
+    const gate = canTransition(task, "cancel", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    const reason = reasonId as CancelReasonId;
+    patchTask(draft, taskId, {
+      status: nextStatus("cancel"),
+      cancelledAt: new Date().toISOString(),
+      cancelledBy: user.id,
+      cancelReason: reason,
+    });
+    // Drop open offers on cancelled looking/matched tasks
+    draft.offers = draft.offers.filter((offer) => offer.taskId !== taskId);
+    const otherId = user.id === task.customerId ? task.helperId : task.customerId;
+    if (otherId) {
+      notify(draft, {
+        userId: otherId,
+        titleEn: `${user.name.split(" ")[0]} cancelled the task.`,
+        titleHi: `${user.name.split(" ")[0]} ने काम रद्द कर दिया।`,
+        bodyEn: `${task.title} · Simulated in-app alert`,
+        bodyHi: `${task.titleHi || task.title} · सिम्युलेटेड इन-ऐप अलर्ट`,
+        href: `/task/${taskId}`,
+      });
+    }
   });
   if (error) return { ok: false, error };
   return { ok: true, state: toPublic(state, sessionUserId) };
@@ -370,8 +549,17 @@ export async function holdPayment(sessionUserId: string, taskId: string): Promis
   const state = await updateState((draft) => {
     const user = userById(draft, sessionUserId);
     const task = draft.tasks.find((item) => item.id === taskId);
-    if (!user || !task || task.status !== "pay" || task.customerId !== user.id || !task.helperId) {
+    if (!user || !task || !task.helperId) {
       error = "Cannot hold payment.";
+      return;
+    }
+    const gate = canTransition(task, "hold_payment", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    if (isBlocked(draft, task.customerId, task.helperId)) {
+      error = "Blocked — payment locked until review.";
       return;
     }
     const amount = lockedAmount(task);
@@ -396,13 +584,13 @@ export async function holdPayment(sessionUserId: string, taskId: string): Promis
       heldAt: new Date().toISOString(),
     };
     draft.payments.unshift(payment);
-    patchTask(draft, taskId, { status: "review" });
+    patchTask(draft, taskId, { status: nextStatus("hold_payment") });
     notify(draft, {
       userId: task.helperId,
       titleEn: `${user.name.split(" ")[0]} placed ${money(amount)} in hold.`,
       titleHi: `${user.name.split(" ")[0]} ने ${money(amount)} होल्ड में डाले।`,
-      bodyEn: `You receive ${money(parts.helper)} after confirm — 10% fee stays with LocalMate until then.`,
-      bodyHi: `कस्टमर कन्फ़र्म के बाद आपको ${money(parts.helper)} मिलेंगे। तब तक LocalMate होल्ड में रखेगा।`,
+      bodyEn: `You receive ${money(parts.helper)} after review confirm · Simulated alert`,
+      bodyHi: `रिव्यू कन्फ़र्म के बाद आपको ${money(parts.helper)} · सिम्युलेटेड अलर्ट`,
       href: `/task/${taskId}/review`,
     });
   });
@@ -426,8 +614,17 @@ export async function confirmAndReview(
   const state = await updateState((draft) => {
     const user = userById(draft, sessionUserId);
     const task = draft.tasks.find((item) => item.id === taskId);
-    if (!user || !task || task.status !== "review" || task.customerId !== user.id || !task.helperId) {
+    if (!user || !task || !task.helperId) {
       error = "Cannot confirm.";
+      return;
+    }
+    const gate = canTransition(task, "complete_review", user.id, user.role);
+    if (!gate.ok) {
+      error = gate.error;
+      return;
+    }
+    if (isBlocked(draft, task.customerId, task.helperId)) {
+      error = "Blocked — cannot release payment.";
       return;
     }
     const payment = draft.payments.find((p) => p.taskId === taskId && p.status === "held");
@@ -440,9 +637,14 @@ export async function confirmAndReview(
       error = "Amount mismatch — payment blocked.";
       return;
     }
+    // Prevent duplicate completion
+    if (task.status === "completed") {
+      error = "Already completed.";
+      return;
+    }
     payment.status = "released";
     payment.releasedAt = new Date().toISOString();
-    patchTask(draft, taskId, { status: "completed" });
+    patchTask(draft, taskId, { status: nextStatus("complete_review") });
 
     draft.users = draft.users.map((item) => {
       if (item.id !== task.helperId) return item;
@@ -476,7 +678,7 @@ export async function sendMessage(sessionUserId: string, taskId: string, text: s
   const state = await updateState((draft) => {
     const user = userById(draft, sessionUserId);
     const task = draft.tasks.find((item) => item.id === taskId);
-    if (!user || !task || task.status === "looking") {
+    if (!user || !task || !isChatOpen(task.status)) {
       error = "Chat closed.";
       return;
     }
@@ -528,11 +730,47 @@ export async function reportUser(
   return { ok: true, state: toPublic(state, sessionUserId) };
 }
 
-export async function blockUser(sessionUserId: string, userId: string): Promise<MutateResult> {
+export async function blockUser(sessionUserId: string, userId: string, taskId?: string): Promise<MutateResult> {
   if (userId === sessionUserId) return { ok: false, error: "Cannot block yourself." };
   const state = await updateState((draft) => {
-    if (draft.blocks.some((b) => b.by === sessionUserId && b.userId === userId)) return;
-    draft.blocks.push({ by: sessionUserId, userId });
+    if (!draft.blocks.some((b) => b.by === sessionUserId && b.userId === userId)) {
+      draft.blocks.push({ by: sessionUserId, userId });
+    }
+    if (taskId) {
+      const task = draft.tasks.find((item) => item.id === taskId);
+      if (
+        task &&
+        (task.customerId === sessionUserId || task.helperId === sessionUserId) &&
+        (task.customerId === userId || task.helperId === userId)
+      ) {
+        const gate = canTransition(task, "flag_from_block", sessionUserId, userById(draft, sessionUserId)?.role ?? "customer");
+        if (gate.ok) {
+          patchTask(draft, task.id, {
+            status: nextStatus("flag_from_block"),
+            flaggedAt: new Date().toISOString(),
+            flagReason: "Blocked by participant — safety review required",
+          });
+          const otherId = sessionUserId === task.customerId ? task.helperId : task.customerId;
+          if (otherId) {
+            notify(draft, {
+              userId: otherId,
+              titleEn: "This task was flagged after a block. Chat and new actions are restricted.",
+              titleHi: "ब्लॉक के बाद यह काम फ़्लैग हो गया। चैट और नए ऐक्शन बंद हैं।",
+              bodyEn: "Simulated safety alert · no auto-complete or payment",
+              bodyHi: "सिम्युलेटेड सेफ्टी अलर्ट · ऑटो-कम्प्लीट/पेमेंट नहीं",
+              href: `/task/${task.id}/work`,
+            });
+          }
+        }
+      }
+    }
+  });
+  return { ok: true, state: toPublic(state, sessionUserId) };
+}
+
+export async function unblockUser(sessionUserId: string, userId: string): Promise<MutateResult> {
+  const state = await updateState((draft) => {
+    draft.blocks = draft.blocks.filter((b) => !(b.by === sessionUserId && b.userId === userId));
   });
   return { ok: true, state: toPublic(state, sessionUserId) };
 }
